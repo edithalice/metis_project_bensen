@@ -56,18 +56,11 @@ def read_files(dates, data_dir='./mta_data/'):
     for dt in dates:
         assert len(dt) == 10, 'Dates must be in yyyy-mm-dd format.'
         try:
-            df = pd.concat([df, pd.read_csv(data_dir+'turnstile_{}.txt' \
-                                            .format(dt[2:4]+dt[5:7]+dt[8:10]), \
-                                            parse_dates=[['DATE', 'TIME']])])
-
-            df.columns = list(map((lambda x: x.strip() if isinstance(x, str) else x), 
-                  df.columns.values))
-
-            df = df.rename(columns=COLUMNS)
-            return df
+            df = df.append(read_file(dt)) # or is concat() better?
         except:
             # file does not exist
-            return None
+            pass
+    return df
 
 def clean(df):
     '''
@@ -158,10 +151,11 @@ def run():
     # print (read_files(['2020-06-27','2020-06-27']))
     # df = read_file('2020-06-27')
     df = read_files(['2020-06-27', '2020-06-20'])
+    print (df)
     df = clean(df)
     df = calc_nets(df)
-    print (agg_by(df, 'date', 'station'))
-    print (df)
+    # print (agg_by(df, 'date', 'station'))
+    # print (df)
     return df
 
 run()
