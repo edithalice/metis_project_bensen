@@ -1,3 +1,4 @@
-./mta_data/
+mta_data/
 *.txt
+.ipynb_checkpoints
 
