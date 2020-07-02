@@ -17,10 +17,16 @@ Changes as of 07/01:
 - added 'booth' and 'time' options to agg_by() + cleaned it up
 - added time column to make it easier to use a variety of options in agg_by
 
+7/01 Changes 2.0
+- jk about the time column. In fact, removed date column too
+- added 'day' and 'week/day' options to agg_by to enable sorting by day of week
+    or by whether a day is a weekday or a weekend day
+
 '''
 
 import numpy as np
 import pandas as pd
+from datetime import date, datetime
 
 # Deals with SettingWithCopyWarning
 pd.options.mode.chained_assignment = None
@@ -77,7 +83,8 @@ def read_files(dates, data_dir='./mta_data/'):
 
 def clean(df):
     '''
-    Add new columns (date, tuid, station) to ease grouping and add unique identifiers.
+    Add unique identifiers columns as well as turnstile count per station
+    (tuid, buid, suid, ts_count).
 
     '''
     # TODO: Remove whitespaces from columns with string values
@@ -87,23 +94,14 @@ def clean(df):
 
     # TODO: NaN handling. Rows with empty cells or '-' 
 
-    # Create date column to make grouping by date easier
-    df['date'] = df['datetime'].dt.date
-    # Create time column to make grouping by time easier
-    df['time'] = df['datetime'].dt.time
     # Create UID to uniquely identify a turnstile by (c_a, unit, scp, station)
     df['tuid'] = pd.factorize(df['c_a'] + df['unit'] + df['scp'] + df['station'])[0]
     # Create UID to uniquely identify a station by (station, linename)
     df['suid'] = pd.factorize(df['station'] + df['linename'])[0]
     # Create UID to uniquely identify an operator booth by
     # (c_a, station, linename)
-    df['buid'] = pd.factorize(df['c_a'] + df['station'] + df['linename'])[0]
-
-    ## Creating a column to add a turnstile count for each suid
-    # ran into issues with repeating TS_COUNT across rows for each suid
-    # hopefully going to make functional soon
-    # df['STATION_SIZE'] = df.groupby('suid')['tuid']\
-    # .nunique().reset_index().rename(columns={'tuid':'TS_COUNT'})
+    df['buid'] = pd.factorize(df['c_a'] + df['unit'] + \
+                        df['station'] + df['linename'])[0]
     
     # Sort by [suid, tuid, datetime]
     # This ensures that when we later groupby either tuid or suid, 
@@ -111,6 +109,9 @@ def clean(df):
     df = df.sort_values(['suid','tuid','datetime'])
     # Reindex df to reflect the new sorting
     df = df.reset_index(drop=True) # drop=True gets rid of old index
+
+    df_ss = df.groupby('suid')['tuid'].nunique().to_dict()
+    df['ts_count'] = df.suid.map(df_ss)
     return df
 
 
@@ -228,36 +229,37 @@ def agg_by(df, *args):
     Possible arguments:
     'date' -- aggregates entry and exit data for each full day
     'time' -- aggregates entry and exit data for each four hour chunk
+    'day' -- aggregates entry and exit data by day of week (will only
+        really be useful if data contains >1 week)
+    'week/end' -- aggregates entry and exit data into week (M-F) and weekend
     'station' -- aggregates entry and exit data for each station
     'booth' -- aggregates entry and exit data for each booth
 
     '''
 
-    time_agg = 'datetime'
-    spatial_agg = 'tuid'
+    aggs = ['datetime', 'tuid']
+    if 'booth' in args:
+        aggs[1] = 'buid'
+    elif 'station' in args:
+        aggs[1] = 'suid'
 
     if 'date' in args:
-        time_agg = 'date'
+        aggs = [aggs[1], df['datetime'].dt.date.rename('date')]
     elif 'time' in args:
-        time_agg = 'time'
+        aggs = [aggs[1], df['datetime'].dt.time.rename('time')]
 
-    if 'booth' in args:
-        spatial_agg = 'buid'
-    elif 'station' in args:
-        spatial_agg = 'suid'
+    if 'day' in args:
+        agg3 = df['datetime'].dt.day_name().rename('day')
+        aggs = [agg3, *aggs]
+    elif 'week/end' in args:
+        aggs = [df['datetime'].dt.dayofweek.apply(lambda x: 'weekend'
+                                                   if  x >= 5 else 'week')\
+                                                   .rename('week/end'), *aggs]
 
     # Raise error if none of the args given were recognized
-    if time_agg == 'datetime' and spatial_agg == 'tuid':
+    if aggs == ['datetime', 'tuid']:
         raise ValueError('Incorrect input argument(s)')
 
-    # if aggregating by date or time with or without other factors, must group
-    # by date/time after the spatial factor. However, if not aggregating by
-    # date or time at all, must group by date_time prior to spatial factor
-    if time_agg == 'datetime':
-        agg1, agg2 = time_agg, spatial_agg
-    else:
-        agg1, agg2 = spatial_agg, time_agg
 
-    df = df.groupby([agg1, agg2])\
-                    [['net_entries', 'net_exits']].sum().reset_index()
+    df = df.groupby(aggs)[['net_entries', 'net_exits']].sum().reset_index()
     return df
