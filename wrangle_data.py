@@ -26,7 +26,7 @@ Changes as of 07/01:
 
 import numpy as np
 import pandas as pd
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 # Deals with SettingWithCopyWarning
 pd.options.mode.chained_assignment = None
@@ -44,15 +44,15 @@ COLUMNS =  {'DATE_TIME': 'datetime',
             'EXITS':     'exits'}
 
 
-def read_file(date, data_dir='./mta_data/'):
+def read_file(dt, data_dir='./mta_data/'):
     '''
     Assumes data files are in ./mta_data/ directory
     Args:
-        date (str): yyyy-mm-dd format date
+        dt (str): yyyy-mm-dd format date
     '''
-    assert isinstance(date, str), 'Date must be in yymmdd or yyyy-mm-dd format.'
-    assert len(date) in [6,10]
-    dname = date if len(date) == 6 else date[2:4]+date[5:7]+date[8:10]
+    assert isinstance(dt, str), 'Date must be in yymmdd or yyyy-mm-dd format.'
+    assert len(dt) in [6,10]
+    dname = dt if len(dt) == 6 else dt[2:4]+dt[5:7]+dt[8:10]
     df = pd.DataFrame()
     try:
         df = pd.read_csv(data_dir+'turnstile_{}.txt'.format(dname), 
@@ -65,15 +65,15 @@ def read_file(date, data_dir='./mta_data/'):
         pass  # file does not exist
     return df
 
-def read_files(dates, data_dir='./mta_data/'):
+def read_files(dts, data_dir='./mta_data/'):
     '''
     Reads multiple files and returns one single DataFrame
 
     Args:
-        dates (list): list of dates in yyyy-mm-dd format
+        dts (list): list of dates in yyyy-mm-dd format
     '''
     df = pd.DataFrame()
-    for dt in dates:
+    for dt in dts:
         assert len(dt) == 10, 'Dates must be in yyyy-mm-dd format.'
         try:
             df = pd.concat([df, read_file(dt)], ignore_index=True)
@@ -109,6 +109,10 @@ def clean(df):
     df = df.sort_values(['suid','tuid','datetime'])
     # Reindex df to reflect the new sorting
     df = df.reset_index(drop=True) # drop=True gets rid of old index
+
+    # Instead of adding ts_count to each row in the original df,
+    # wouldn't it be better to create a dictionary to map
+    # {suid: ts_count} ?
 
     df_ss = df.groupby('suid')['tuid'].nunique().to_dict()
     df['ts_count'] = df.suid.map(df_ss)
@@ -181,8 +185,17 @@ def get_saturdays_between(start, end):
     start = date(s_year, s_month, s_day)
     end = date(e_year, e_month, e_day)
 
-    # go to future monday and subtract 2
+    # Saturday is +5 on datetime's weekday() calendar.
+    # Add the difference between 5 and start.weekday()
+    # to get to the nearest Saturday. Then add another
+    # 7 days and mod that by 7 to get the closest 
+    # Saturday in the future
     s_offset = (12 - start.weekday()) % 7
+    # Whatever day of the week it is, go to the nearest
+    # Monday, which is +0 on datetime's weekday() calendar.
+    # Subtract an extra 2 days to get to a Saturday in 
+    # the past, then mod by 7 to get the nearest 
+    # Saturday in the past
     e_offset = (end.weekday() + 2) % 7
 
     start += timedelta(days=s_offset)
