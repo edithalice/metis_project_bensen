@@ -87,7 +87,7 @@ def clean(df):
     (tuid, buid, suid, ts_count).
 
     '''
-    # TODO: Remove whitespaces from columns with string values
+    # Remove whitespaces from columns with string values
     str_cols = ['c_a', 'unit', 'scp', 'station', 'linename', 'division', 'desc']
     for col in str_cols:
         df[col] = df[col].str.strip()
