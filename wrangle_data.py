@@ -26,47 +26,188 @@ Changes as of 07/01:
 
 import numpy as np
 import pandas as pd
-import get_data as gd
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+
+# Deals with SettingWithCopyWarning
+pd.options.mode.chained_assignment = None
+
+# Column rename mapping
+COLUMNS =  {'DATE_TIME': 'datetime',
+            'C/A':       'c_a',
+            'UNIT':      'unit',
+            'SCP':       'scp',
+            'STATION':   'station',
+            'LINENAME':  'linename',
+            'DIVISION':  'division',
+            'DESC':      'desc',
+            'ENTRIES':   'entries',
+            'EXITS':     'exits'}
+
+
+def read_file(dt, data_dir='./mta_data/'):
+    '''
+    Assumes data files are in ./mta_data/ directory
+    Args:
+        dt (str): yyyy-mm-dd format date
+    '''
+    assert isinstance(dt, str), 'Date must be in yymmdd or yyyy-mm-dd format.'
+    assert len(dt) in [6,10]
+    dname = dt if len(dt) == 6 else dt[2:4]+dt[5:7]+dt[8:10]
+    df = pd.DataFrame()
+    try:
+        df = pd.read_csv(data_dir+'turnstile_{}.txt'.format(dname), 
+                                            parse_dates=[['DATE', 'TIME']])
+        df.columns = list(map((lambda x: x.strip() if isinstance(x, str) else x), 
+                      df.columns.values))
+
+        df = df.rename(columns=COLUMNS)
+    except:
+        pass  # file does not exist
+    return df
+
+def read_files(dts, data_dir='./mta_data/'):
+    '''
+    Reads multiple files and returns one single DataFrame
+
+    Args:
+        dts (list): list of dates in yyyy-mm-dd format
+    '''
+    df = pd.DataFrame()
+    for dt in dts:
+        assert len(dt) == 10, 'Dates must be in yyyy-mm-dd format.'
+        try:
+            df = pd.concat([df, read_file(dt)], ignore_index=True)
+        except:
+            pass  # file does not exist
+    return df
 
 def clean(df):
     '''
     Add unique identifiers columns as well as turnstile count per station
-    (TUID, BUID, SUID, TS_COUNT).
+    (tuid, buid, suid, ts_count).
 
     '''
+    # TODO: Remove whitespaces from columns with string values
+    str_cols = ['c_a', 'unit', 'scp', 'station', 'linename', 'division', 'desc']
+    for col in str_cols:
+        df[col] = df[col].str.strip()
 
-    # Create UID to uniquely identify a turnstile by
-    # (C/A, UNIT, SCP, STATION, LINENAME)
-    df['TUID'] = pd.factorize(df['C/A'] + df['UNIT'] + df['SCP'] +
-                              df['STATION'] + df['LINENAME'])[0]
+    # TODO: NaN handling. Rows with empty cells or '-' 
+
+    # Create UID to uniquely identify a turnstile by (c_a, unit, scp, station)
+    df['tuid'] = pd.factorize(df['c_a'] + df['unit'] + df['scp'] + df['station'])[0]
+    # Create UID to uniquely identify a station by (station, linename)
+    df['suid'] = pd.factorize(df['station'] + df['linename'])[0]
     # Create UID to uniquely identify an operator booth by
-    # (C/A, STATION, UNIT, LINENAME)
-    df['BUID'] = pd.factorize(df['C/A'] + df['UNIT'] + df['STATION'] +
-                              df['LINENAME'])[0]
-    # Create UID to uniquely identify a station by (STATION, LINENAME)
-    df['SUID'] = pd.factorize(df['STATION'] + df['LINENAME'])[0]
+    # (c_a, station, linename)
+    df['buid'] = pd.factorize(df['c_a'] + df['unit'] + \
+                        df['station'] + df['linename'])[0]
+    
+    # Sort by [suid, tuid, datetime]
+    # This ensures that when we later groupby either tuid or suid, 
+    # rows within each group will appear chronologically
+    df = df.sort_values(['suid','tuid','datetime'])
+    # Reindex df to reflect the new sorting
+    df = df.reset_index(drop=True) # drop=True gets rid of old index
 
-    ## Create a column to add a turnstile count for each SUID
-    df_ss = df.groupby('SUID')['TUID'].nunique().to_dict()
-    df['TS_COUNT'] = df.SUID.map(df_ss)
+    # Instead of adding ts_count to each row in the original df,
+    # wouldn't it be better to create a dictionary to map
+    # {suid: ts_count} ?
 
+    df_ss = df.groupby('suid')['tuid'].nunique().to_dict()
+    df['ts_count'] = df.suid.map(df_ss)
     return df
+
 
 def calc_nets(df):
     '''
-    Create two new columns (NET_ENTRIES, NET_EXITS) that contains the net
+    Create two new columns (net_entries, net_exits) that contains the net 
     entries and net exits of each turnstile for each four hour period.
-    AKA converts ENTRIES and EXITS from cumulative values to net values.
+    AKA converts entries and exits from cumulative values to net values.
 
     '''
-    # Group by TUID and DATE_TIME and calculate deltas between rows
-    tuid_groups = df.groupby(['TUID'])
-    df['NET_ENTRIES'] = tuid_groups['ENTRIES'].diff().shift(-1)
-    df['NET_EXITS'] = tuid_groups['EXITS'].diff().shift(-1)
+    # Group by tuid and calculate deltas between rows
+    # This assumes df is sorted by ['tuid', 'datetime']
+    # Else, we'll get incorrect deltas
+
+    if 'net_entries' in df.columns and 'net_exits' in df.columns:
+        return df  # calc_nets has already been run
+
+    tuid_groups = df.groupby(['tuid'])
+    df['net_entries'] = tuid_groups['entries'].diff().shift(-1)
+    df['net_exits'] = tuid_groups['exits'].diff().shift(-1)
+
+    # TODO: Note that this leaves the last row of each group with NaN values
+    # for net_entries and net_exits. Handle that by dropping them
+    df = df.dropna()
+
+    # TODO: Convert np.float64 columns to np.int64 using .astype(int)
+    df['net_entries'] = df['net_entries'].astype(int)
+    df['net_exits'] = df['net_exits'].astype(int)
+
+    # TODO: Handle ridiculously large net_entries and net_exits
+    # Some net_entries and net_exits are < 0, e.g. a turnstile that counts
+    # backards. Drop those rows
+    threshold = 7200  #  more than 1 person every 2 secs is unlikely
+    df = (df[(df['net_entries']>=0) & (df['net_exits']>=0) &
+            (df['net_entries']<=threshold) & (df['net_exits']<=threshold)])
     return df
 
-def run(dname='200627', ename=''):
+
+def get_saturdays_between(start, end):
+    """
+    Returns list of dates of all Saturdays between start
+    and end, inclusive.
+
+    Args:
+        start (str): date in yymmdd or yyyy-mm-dd format
+        end (str): date in yymmdd or yyyy-mm-dd format
+
+    Returns:
+        List of string dates in %Y-%m-%d format.
+    """
+    def chunk_date(dt):
+        assert isinstance(dt, date) or len(dt) in [6,10]
+        y = m = d = None
+        if isinstance(dt, str):
+            y, m, d = ((int('20'+dt[:2]), int(dt[2:4]), int(dt[4:6]))
+                            if len(dt) == 6 else 
+                                (int(dt[:4]), int(dt[5:7]), int(dt[8:10])))
+        else:
+            y, m, d = dt.year, dt.month, dt.day
+        return y, m, d
+
+    dates = []
+
+    s_year, s_month, s_day = chunk_date(start)
+    e_year, e_month, e_day = chunk_date(end)
+
+    start = date(s_year, s_month, s_day)
+    end = date(e_year, e_month, e_day)
+
+    # Saturday is +5 on datetime's weekday() calendar.
+    # Add the difference between 5 and start.weekday()
+    # to get to the nearest Saturday. Then add another
+    # 7 days and mod that by 7 to get the closest 
+    # Saturday in the future
+    s_offset = (12 - start.weekday()) % 7
+    # Whatever day of the week it is, go to the nearest
+    # Monday, which is +0 on datetime's weekday() calendar.
+    # Subtract an extra 2 days to get to a Saturday in 
+    # the past, then mod by 7 to get the nearest 
+    # Saturday in the past
+    e_offset = (end.weekday() + 2) % 7
+
+    start += timedelta(days=s_offset)
+    end -= timedelta(days=e_offset)
+
+    curr = start
+    while curr <= end:
+        dates.append(curr.strftime('%Y-%m-%d'))
+        curr += timedelta(days=7)
+    return dates
+
+def run(dname='200627', ename='', data_dir='./mta_data/'):
     '''
     Executes the main cleaning code, calling other functions to clean up data
     add various columns for sorting and interpret cumulative ENTRIES and EXITS
@@ -78,20 +219,18 @@ def run(dname='200627', ename=''):
     ename -- Saturday of last week desired if more than one is desired
 
     '''
-    data_dir = './mta_data/'
-    df = pd.read_csv(data_dir + 'turnstile_' + dname + '.txt',
-                     parse_dates=[['DATE', 'TIME']])
     if ename:
-        dname = '20' + '-'.join([dname[:2], dname[2:4], dname[4:]])
-        ename = datetime.strptime(ename, '%y%m%d').date()
-        dates = gd.get_saturdays_after(dname, ename)
-        filenames = list(map(lambda x: 'turnstile_{}{}{}.txt'.format(x[2:4], x[5:7], x[8:10]), dates))
-        for file in filenames[1:]:
-            df = pd.concat([df, pd.read_csv(data_dir+file, parse_dates=[['DATE', 'TIME']])], ignore_index=True)
-    df.columns = list(map((lambda x: x.strip() if isinstance(x, str) else x),
-                          df.columns.values))
-    df = clean(df)
-    df = calc_nets(df)
+        # get list of datestrings between dname and ename
+        dates = get_saturdays_between(dname, ename)
+        df = read_files(dates)
+    else:
+        # reading only one file
+        assert len(dname) in [6,10]
+        dname = ('20{}-{}-{}'.format(dname[:2], dname[2:4], dname[4:6]) if 
+                    len(dname) == 6 else dname)
+        df = read_file(dname)
+
+    df = calc_nets(clean(df))
     return df
 
 def agg_by(df, *args):
@@ -111,29 +250,29 @@ def agg_by(df, *args):
 
     '''
 
-    aggs = ['DATE_TIME', 'TUID']
+    aggs = ['datetime', 'tuid']
     if 'booth' in args:
-        aggs[1] = 'BUID'
+        aggs[1] = 'buid'
     elif 'station' in args:
-        aggs[1] = 'SUID'
+        aggs[1] = 'suid'
 
     if 'date' in args:
-        aggs = [aggs[1], df['DATE_TIME'].dt.date.rename('DATE')]
+        aggs = [aggs[1], df['datetime'].dt.date.rename('date')]
     elif 'time' in args:
-        aggs = [aggs[1], df['DATE_TIME'].dt.time.rename('TIME')]
+        aggs = [aggs[1], df['datetime'].dt.time.rename('time')]
 
     if 'day' in args:
-        agg3 = df['DATE_TIME'].dt.day_name().rename('DAY')
+        agg3 = df['datetime'].dt.day_name().rename('day')
         aggs = [agg3, *aggs]
     elif 'week/end' in args:
-        aggs = [df['DATE_TIME'].dt.dayofweek.apply(lambda x: 'weekend'
+        aggs = [df['datetime'].dt.dayofweek.apply(lambda x: 'weekend'
                                                    if  x >= 5 else 'week')\
-                                                   .rename('WEEK/END'), *aggs]
+                                                   .rename('week/end'), *aggs]
 
     # Raise error if none of the args given were recognized
-    if aggs == ['DATE_TIME', 'TUID']:
+    if aggs == ['datetime', 'tuid']:
         raise ValueError('Incorrect input argument(s)')
 
 
-    df = df.groupby(aggs)[['NET_ENTRIES', 'NET_EXITS']].sum().reset_index()
+    df = df.groupby(aggs)[['net_entries', 'net_exits']].sum().reset_index()
     return df
