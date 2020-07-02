@@ -1,5 +1,6 @@
-mta_data/
+mta_data/*
 *.txt
-.ipynb_checkpoints
-__pycache__
+.ipynb_checkpoints/*
+__pycache__/*
 .DS_Store
+mta_eda.ipynb

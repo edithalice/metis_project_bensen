@@ -87,10 +87,12 @@ def clean(df):
     (tuid, buid, suid, ts_count).
 
     '''
-    # TODO: Remove whitespaces from columns with string values
+    # Remove whitespaces from columns with string values
     str_cols = ['c_a', 'unit', 'scp', 'station', 'linename', 'division', 'desc']
     for col in str_cols:
         df[col] = df[col].str.strip()
+
+    # TODO: sort linename
 
     # TODO: NaN handling. Rows with empty cells or '-' 
 
@@ -145,14 +147,39 @@ def calc_nets(df):
     df['net_entries'] = df['net_entries'].astype(int)
     df['net_exits'] = df['net_exits'].astype(int)
 
-    # TODO: Handle ridiculously large net_entries and net_exits
+    # Handle ridiculously large net_entries and net_exits
     # Some net_entries and net_exits are < 0, e.g. a turnstile that counts
     # backards. Drop those rows
     threshold = 7200  #  more than 1 person every 2 secs is unlikely
     df = (df[(df['net_entries']>=0) & (df['net_exits']>=0) &
             (df['net_entries']<=threshold) & (df['net_exits']<=threshold)])
+
+
+    # Create foot traffic column
+    df['traffic'] = df['net_entries'] + df['net_exits']
     return df
 
+def query_dates(df, start, end):
+    """
+    Args:
+        df (DataFrame): preprocessed DataFrame
+        start (str): start date
+        end (str): end date
+    """
+    return df[(df['datetime'].dt.date >= pd.to_datetime(start)) & \
+                (df['datetime'].dt.date < pd.to_datetime(end))]
+
+def drop_dates(df, start, end):
+    return df[(df['datetime'].dt.date < pd.to_datetime(start)) | \
+                (df['datetime'].dt.date >= pd.to_datetime(end))]
+
+
+def add_metrics(df):
+    """
+    TODO: Add in Kelsey's add_metrics.py here
+    """
+
+    pass
 
 def get_saturdays_between(start, end):
     """
