@@ -1,21 +1,41 @@
+"""
+Downloads turnstile data from http://web.mta.info/developers/turnstile.html
+
+Run using `python get_data.py yyyy-mm-dd`
+where yyyy-mm-dd is an optional argument representing the earliest date
+you want downloaded.
+
+"""
+
+
 import os
 import sys
 import requests
 from datetime import date, datetime, timedelta
 
 def get_most_recent_saturday():
+    """
+    Get most recent Saturday before today.
+    """
     today = date.today()
     # today.weekday() is 0-indexed starting on Monday (e.g. Thu is 3)
     # to get most recent Saturday, we first get nearest Monday,
     # then we subtract 2 extra days
-    offset = today.weekday()+2
+    offset = (today.weekday()+2) % 7
     last_sat = today - timedelta(days=offset)
     return last_sat
 
-def get_saturdays_after(dt, last_sat):
+
+def _get_saturdays_after(dt, last_sat):
     """
-    Returns list of dates of all Saturdays from dt to last_sat
+    Returns list of dates of all Saturdays from dt to last_sat.
+    To be only used internally.
+
+    Args:
+        dt (str): date in %Y-%m-%d format for earliest date.
+        last_sat (datetime.date): date object for most recent Saturday
     """
+
     dates = []
     cutoff = datetime.strptime(dt, '%Y-%m-%d').date()
 
@@ -48,7 +68,7 @@ def main(argv):
     last_sat = get_most_recent_saturday()
     first_date = '2017-01-01' if len(argv) == 0 else argv[0]
     assert len(first_date) == 10
-    dates = get_saturdays_after(first_date, last_sat)
+    dates = _get_saturdays_after(first_date, last_sat)
     get_data(dates)
 
 if __name__ == '__main__':

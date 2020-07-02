@@ -2,9 +2,20 @@
 Module for wrangling data.
 
 You'll want to use two main functions:
-- call run() to return a clean data frame with net entry and exit data calculated.
-- call agg_by(df, args) to return a data frame with entry and exit data summed 
-  according to args. Possible args are 'date', 'station', or both
+- call run() to return a clean data frame with net entry and exit data
+calculated. You can include positional arguments for run in the form YYMMDD to
+specify which weeks are pulled. Default is the week ending in 06/27. If one
+argument given, will create dataframe for week specified. If two arguments
+given, will create data frame for all weeks between the first argument and the
+second argument.
+- call agg_by(df, args) to return a data frame with entry and exit data summed
+according to args. Possible args are currently 'date', 'time', 'booth',
+'station', or some combination of 'date' or 'time' and 'booth' or 'station'.
+
+Changes as of 07/01:
+- added optional args to run() to specify week(s) of data to load as df
+- added 'booth' and 'time' options to agg_by() + cleaned it up
+- added time column to make it easier to use a variety of options in agg_by
 
 '''
 
@@ -33,11 +44,12 @@ def read_file(date, data_dir='./mta_data/'):
     Args:
         date (str): yyyy-mm-dd format date
     '''
-    assert len(date) == 10, 'Dates must be in yyyy-mm-dd format.'
+    assert isinstance(date, str), 'Date must be in yymmdd or yyyy-mm-dd format.'
+    assert len(date) in [6,10]
+    dname = date if len(date) == 6 else date[2:4]+date[5:7]+date[8:10]
     df = pd.DataFrame()
     try:
-        df = pd.read_csv(data_dir+'turnstile_{}.txt'.format(
-                                            date[2:4]+date[5:7]+date[8:10]), 
+        df = pd.read_csv(data_dir+'turnstile_{}.txt'.format(dname), 
                                             parse_dates=[['DATE', 'TIME']])
         df.columns = list(map((lambda x: x.strip() if isinstance(x, str) else x), 
                       df.columns.values))
@@ -75,18 +87,31 @@ def clean(df):
 
     # TODO: NaN handling. Rows with empty cells or '-' 
 
+    # Create date column to make grouping by date easier
+    df['date'] = df['datetime'].dt.date
+    # Create time column to make grouping by time easier
+    df['time'] = df['datetime'].dt.time
     # Create UID to uniquely identify a turnstile by (c_a, unit, scp, station)
     df['tuid'] = pd.factorize(df['c_a'] + df['unit'] + df['scp'] + df['station'])[0]
     # Create UID to uniquely identify a station by (station, linename)
     df['suid'] = pd.factorize(df['station'] + df['linename'])[0]
+    # Create UID to uniquely identify an operator booth by
+    # (c_a, station, linename)
+    df['buid'] = pd.factorize(df['c_a'] + df['station'] + df['linename'])[0]
+
+    ## Creating a column to add a turnstile count for each suid
+    # ran into issues with repeating TS_COUNT across rows for each suid
+    # hopefully going to make functional soon
+    # df['STATION_SIZE'] = df.groupby('suid')['tuid']\
+    # .nunique().reset_index().rename(columns={'tuid':'TS_COUNT'})
+    
     # Sort by [suid, tuid, datetime]
-    # This ensures that when we later groupby either TUID or SUID, 
+    # This ensures that when we later groupby either tuid or suid, 
     # rows within each group will appear chronologically
     df = df.sort_values(['suid','tuid','datetime'])
     # Reindex df to reflect the new sorting
     df = df.reset_index(drop=True) # drop=True gets rid of old index
     return df
-
 
 
 def calc_nets(df):
@@ -96,12 +121,13 @@ def calc_nets(df):
     AKA converts entries and exits from cumulative values to net values.
 
     '''
-    # Group by TUID and calculate deltas between rows
-    # This assumes df is sorted by ['TUID', 'DATETIME']
+    # Group by tuid and calculate deltas between rows
+    # This assumes df is sorted by ['tuid', 'datetime']
     # Else, we'll get incorrect deltas
 
     if 'net_entries' in df.columns and 'net_exits' in df.columns:
         return df  # calc_nets has already been run
+
     tuid_groups = df.groupby(['tuid'])
     df['net_entries'] = tuid_groups['entries'].diff().shift(-1)
     df['net_exits'] = tuid_groups['exits'].diff().shift(-1)
@@ -120,40 +146,118 @@ def calc_nets(df):
     threshold = 7200  #  more than 1 person every 2 secs is unlikely
     df = (df[(df['net_entries']>=0) & (df['net_exits']>=0) &
             (df['net_entries']<=threshold) & (df['net_exits']<=threshold)])
+    return df
 
+
+def get_saturdays_between(start, end):
+    """
+    Returns list of dates of all Saturdays between start
+    and end, inclusive.
+
+    Args:
+        start (str): date in yymmdd or yyyy-mm-dd format
+        end (str): date in yymmdd or yyyy-mm-dd format
+
+    Returns:
+        List of string dates in %Y-%m-%d format.
+    """
+    def chunk_date(dt):
+        assert isinstance(dt, date) or len(dt) in [6,10]
+        y = m = d = None
+        if isinstance(dt, str):
+            y, m, d = ((int('20'+dt[:2]), int(dt[2:4]), int(dt[4:6]))
+                            if len(dt) == 6 else 
+                                (int(dt[:4]), int(dt[5:7]), int(dt[8:10])))
+        else:
+            y, m, d = dt.year, dt.month, dt.day
+        return y, m, d
+
+    dates = []
+
+    s_year, s_month, s_day = chunk_date(start)
+    e_year, e_month, e_day = chunk_date(end)
+
+    start = date(s_year, s_month, s_day)
+    end = date(e_year, e_month, e_day)
+
+    # go to future monday and subtract 2
+    s_offset = (12 - start.weekday()) % 7
+    e_offset = (end.weekday() + 2) % 7
+
+    start += timedelta(days=s_offset)
+    end -= timedelta(days=e_offset)
+
+    curr = start
+    while curr <= end:
+        dates.append(curr.strftime('%Y-%m-%d'))
+        curr += timedelta(days=7)
+    return dates
+
+def run(dname='200627', ename='', data_dir='./mta_data/'):
+    '''
+    Executes the main cleaning code, calling other functions to clean up data
+    add various columns for sorting and interpret cumulative ENTRIES and EXITS
+    columns in NET_ENTRIES and NET_EXITS columns.
+
+    Optional arguments:
+    dname -- Saturday of week desired. If ename is also given, dname is
+    Saturday of first week desired
+    ename -- Saturday of last week desired if more than one is desired
+
+    '''
+    if ename:
+        # get list of datestrings between dname and ename
+        dates = get_saturdays_between(dname, ename)
+        df = read_files(dates)
+    else:
+        # reading only one file
+        assert len(dname) in [6,10]
+        dname = ('20{}-{}-{}'.format(dname[:2], dname[2:4], dname[4:6]) if 
+                    len(dname) == 6 else dname)
+        df = read_file(dname)
+
+    df = calc_nets(clean(df))
     return df
 
 def agg_by(df, *args):
     '''
     Aggregate the net entries and exits columns by date, station, or both.
-    Input must be a data frame that has already been processed by the run() function!
+    Input must be a data frame that has already been processed by the run()
+    function!
 
     Possible arguments:
-    'date' -- aggregates entry and exit data for each full day for each turnstile
-    'station' -- aggregates entry and exit data for each station for each four hour time stamp
-    'date', 'station' -- aggregates entry and exit data for each full day for each station
+    'date' -- aggregates entry and exit data for each full day
+    'time' -- aggregates entry and exit data for each four hour chunk
+    'station' -- aggregates entry and exit data for each station
+    'booth' -- aggregates entry and exit data for each booth
 
     '''
-    agg_cols = ['net_entries','net_exits']
-    if 'date' in args and 'station' in args:
-        df = df.groupby([df['suid'], df['datetime'].dt.date])[agg_cols].sum()
-        df.reset_index(inplace=True)
+
+    time_agg = 'datetime'
+    spatial_agg = 'tuid'
+
+    if 'date' in args:
+        time_agg = 'date'
+    elif 'time' in args:
+        time_agg = 'time'
+
+    if 'booth' in args:
+        spatial_agg = 'buid'
     elif 'station' in args:
-        df = df.groupby(['datetime', 'suid'])[agg_cols].sum()
-        df.reset_index(inplace=True)
-    elif 'date' in args:
-        df = df.groupby([df['tuid'], df['datetime'].dt.date])[agg_cols].sum()
-        df.reset_index(inplace=True)
-    else: raise ValueError('Incorrect input argument')
-    return df
+        spatial_agg = 'suid'
 
-def run():
-    '''
-    Executes the main cleaning code, calling other functions to clean up data and
-    add date, net_entries and net_exits columns.
+    # Raise error if none of the args given were recognized
+    if time_agg == 'datetime' and spatial_agg == 'tuid':
+        raise ValueError('Incorrect input argument(s)')
 
-    '''
-    df = read_files(['2020-06-27', '2020-06-20'])
-    df = clean(df)
-    df = calc_nets(df)
+    # if aggregating by date or time with or without other factors, must group
+    # by date/time after the spatial factor. However, if not aggregating by
+    # date or time at all, must group by date_time prior to spatial factor
+    if time_agg == 'datetime':
+        agg1, agg2 = time_agg, spatial_agg
+    else:
+        agg1, agg2 = spatial_agg, time_agg
+
+    df = df.groupby([agg1, agg2])\
+                    [['net_entries', 'net_exits']].sum().reset_index()
     return df
