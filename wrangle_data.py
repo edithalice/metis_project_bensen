@@ -14,6 +14,7 @@ import pandas as pd
 # Deals with SettingWithCopyWarning
 pd.options.mode.chained_assignment = None
 
+# Column rename mapping
 COLUMNS =  {'DATE_TIME': 'datetime',
             'C/A':       'c_a',
             'UNIT':      'unit',
@@ -32,6 +33,8 @@ def read_file(date, data_dir='./mta_data/'):
     Args:
         date (str): yyyy-mm-dd format date
     '''
+    assert len(date) == 10, 'Dates must be in yyyy-mm-dd format.'
+    df = pd.DataFrame()
     try:
         df = pd.read_csv(data_dir+'turnstile_{}.txt'.format(
                                             date[2:4]+date[5:7]+date[8:10]), 
@@ -40,10 +43,9 @@ def read_file(date, data_dir='./mta_data/'):
                       df.columns.values))
 
         df = df.rename(columns=COLUMNS)
-        return df
     except:
-        # file does not exist
-        return None
+        pass  # file does not exist
+    return df
 
 def read_files(dates, data_dir='./mta_data/'):
     '''
@@ -56,10 +58,9 @@ def read_files(dates, data_dir='./mta_data/'):
     for dt in dates:
         assert len(dt) == 10, 'Dates must be in yyyy-mm-dd format.'
         try:
-            df = df.append(read_file(dt)) # or is concat() better?
+            df = pd.concat([df, read_file(dt)], ignore_index=True)
         except:
-            # file does not exist
-            pass
+            pass  # file does not exist
     return df
 
 def clean(df):
@@ -86,6 +87,8 @@ def clean(df):
     df = df.reset_index(drop=True) # drop=True gets rid of old index
     return df
 
+
+
 def calc_nets(df):
     '''
     Create two new columns (net_entries, net_exits) that contains the net 
@@ -96,6 +99,9 @@ def calc_nets(df):
     # Group by TUID and calculate deltas between rows
     # This assumes df is sorted by ['TUID', 'DATETIME']
     # Else, we'll get incorrect deltas
+
+    if 'net_entries' in df.columns and 'net_exits' in df.columns:
+        return df  # calc_nets has already been run
     tuid_groups = df.groupby(['tuid'])
     df['net_entries'] = tuid_groups['entries'].diff().shift(-1)
     df['net_exits'] = tuid_groups['exits'].diff().shift(-1)
@@ -108,15 +114,14 @@ def calc_nets(df):
     df['net_entries'] = df['net_entries'].astype(int)
     df['net_exits'] = df['net_exits'].astype(int)
 
-    # Some net_entries and net_exits are < 0, e.g. a turnstil that counts
-    # backards. Handle that
-    df = df[(df['net_entries']>=0) & (df['net_exits']>=0)]
+    # TODO: Handle ridiculously large net_entries and net_exits
+    # Some net_entries and net_exits are < 0, e.g. a turnstile that counts
+    # backards. Drop those rows
+    threshold = 7200  #  more than 1 person every 2 secs is unlikely
+    df = (df[(df['net_entries']>=0) & (df['net_exits']>=0) &
+            (df['net_entries']<=threshold) & (df['net_exits']<=threshold)])
 
     return df
-
-
-
-
 
 def agg_by(df, *args):
     '''
@@ -148,14 +153,7 @@ def run():
     add date, net_entries and net_exits columns.
 
     '''
-    # print (read_files(['2020-06-27','2020-06-27']))
-    # df = read_file('2020-06-27')
     df = read_files(['2020-06-27', '2020-06-20'])
-    print (df)
     df = clean(df)
     df = calc_nets(df)
-    # print (agg_by(df, 'date', 'station'))
-    # print (df)
     return df
-
-run()
