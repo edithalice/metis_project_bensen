@@ -93,7 +93,7 @@ def clean(df):
         df[col] = df[col].str.strip()
 
     # TODO: sort linename
-
+    df['linename'] = df['linename'].map(lambda x: ''.join(sorted(x)))
     # TODO: NaN handling. Rows with empty cells or '-' 
 
     # Create UID to uniquely identify a turnstile by (c_a, unit, scp, station)
