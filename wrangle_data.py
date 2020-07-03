@@ -12,16 +12,6 @@ second argument.
 according to args. Possible args are currently 'date', 'time', 'booth',
 'station', or some combination of 'date' or 'time' and 'booth' or 'station'.
 
-Changes as of 07/01:
-- added optional args to run() to specify week(s) of data to load as df
-- added 'booth' and 'time' options to agg_by() + cleaned it up
-- added time column to make it easier to use a variety of options in agg_by
-
-7/01 Changes 2.0
-- jk about the time column. In fact, removed date column too
-- added 'day' and 'week/day' options to agg_by to enable sorting by day of week
-    or by whether a day is a weekday or a weekend day
-
 '''
 
 import numpy as np
@@ -46,7 +36,10 @@ COLUMNS =  {'DATE_TIME': 'datetime',
 
 def read_file(dt, data_dir='./mta_data/'):
     '''
-    Assumes data files are in ./mta_data/ directory
+    Reads one single turnstile file and returns a DataFrame
+    of that data. Data files are assumed to be within ./mta_data/
+    by default.
+
     Args:
         dt (str): yyyy-mm-dd format date
     '''
@@ -55,10 +48,9 @@ def read_file(dt, data_dir='./mta_data/'):
     dname = dt if len(dt) == 6 else dt[2:4]+dt[5:7]+dt[8:10]
     df = pd.DataFrame()
     try:
-        df = pd.read_csv(data_dir+'turnstile_{}.txt'.format(dname), 
+        df = pd.read_csv(data_dir+'turnstile_{}.txt'.format(dname),
                                             parse_dates=[['DATE', 'TIME']])
-        df.columns = list(map((lambda x: x.strip() if isinstance(x, str) else x), 
-                      df.columns.values))
+        df.columns = list(map((lambda x: x.strip() if isinstance(x, str) else x), df.columns.values))
 
         df = df.rename(columns=COLUMNS)
     except:
@@ -67,7 +59,8 @@ def read_file(dt, data_dir='./mta_data/'):
 
 def read_files(dts, data_dir='./mta_data/'):
     '''
-    Reads multiple files and returns one single DataFrame
+    Reads multiple turnstile files and combines them into 
+    one single DataFrame.
 
     Args:
         dts (list): list of dates in yyyy-mm-dd format
@@ -92,9 +85,10 @@ def clean(df):
     for col in str_cols:
         df[col] = df[col].str.strip()
 
-    # TODO: sort linename
-    df['linename'] = df['linename'].map(lambda x: ''.join(sorted(x)))
-    # TODO: NaN handling. Rows with empty cells or '-' 
+    #  Sort linename
+    df['linename'] = df['linename'].apply(lambda x:''.join(sorted(x)))
+
+    # TODO: NaN handling. Rows with empty cells or '-'
 
     # Create UID to uniquely identify a turnstile by (c_a, unit, scp, station)
     df['tuid'] = pd.factorize(df['c_a'] + df['unit'] + df['scp'] + df['station'])[0]
@@ -104,9 +98,9 @@ def clean(df):
     # (c_a, station, linename)
     df['buid'] = pd.factorize(df['c_a'] + df['unit'] + \
                         df['station'] + df['linename'])[0]
-    
+
     # Sort by [suid, tuid, datetime]
-    # This ensures that when we later groupby either tuid or suid, 
+    # This ensures that when we later groupby either tuid or suid,
     # rows within each group will appear chronologically
     df = df.sort_values(['suid','tuid','datetime'])
     # Reindex df to reflect the new sorting
@@ -123,9 +117,16 @@ def clean(df):
 
 def calc_nets(df):
     '''
-    Create two new columns (net_entries, net_exits) that contains the net 
-    entries and net exits of each turnstile for each four hour period.
-    AKA converts entries and exits from cumulative values to net values.
+    Adds three columns to a turnstile DataFrame:
+         - net_entries: number of entries in a four hour period
+         - net_exits: number of exits in a four hour period
+         - traffic: sum of net_entries and net_exits
+
+    This method converts cumulative entry/exit values to raw traffic
+    values within a set period. Also handles NaN values and outliers.
+
+    Args:
+        df (DataFrame): DataFrame of turnstile data
 
     '''
     # Group by tuid and calculate deltas between rows
@@ -161,6 +162,10 @@ def calc_nets(df):
 
 def query_dates(df, start, end):
     """
+    Given DataFrame of turnstile data, returns only rows
+    where its datetime timestamp is between [start, end).
+
+
     Args:
         df (DataFrame): preprocessed DataFrame
         start (str): start date
@@ -170,6 +175,10 @@ def query_dates(df, start, end):
                 (df['datetime'].dt.date < pd.to_datetime(end))]
 
 def drop_dates(df, start, end):
+    """
+    Given DataFrame of turnstile data, removes rows where
+    its datetime timestamp is between [start, end).
+    """
     return df[(df['datetime'].dt.date < pd.to_datetime(start)) | \
                 (df['datetime'].dt.date >= pd.to_datetime(end))]
 
@@ -186,6 +195,8 @@ def get_saturdays_between(start, end):
     Returns list of dates of all Saturdays between start
     and end, inclusive.
 
+    start and end do not need to be dates of Saturdays.
+
     Args:
         start (str): date in yymmdd or yyyy-mm-dd format
         end (str): date in yymmdd or yyyy-mm-dd format
@@ -198,7 +209,7 @@ def get_saturdays_between(start, end):
         y = m = d = None
         if isinstance(dt, str):
             y, m, d = ((int('20'+dt[:2]), int(dt[2:4]), int(dt[4:6]))
-                            if len(dt) == 6 else 
+                            if len(dt) == 6 else
                                 (int(dt[:4]), int(dt[5:7]), int(dt[8:10])))
         else:
             y, m, d = dt.year, dt.month, dt.day
@@ -215,13 +226,13 @@ def get_saturdays_between(start, end):
     # Saturday is +5 on datetime's weekday() calendar.
     # Add the difference between 5 and start.weekday()
     # to get to the nearest Saturday. Then add another
-    # 7 days and mod that by 7 to get the closest 
+    # 7 days and mod that by 7 to get the closest
     # Saturday in the future
     s_offset = (12 - start.weekday()) % 7
     # Whatever day of the week it is, go to the nearest
     # Monday, which is +0 on datetime's weekday() calendar.
-    # Subtract an extra 2 days to get to a Saturday in 
-    # the past, then mod by 7 to get the nearest 
+    # Subtract an extra 2 days to get to a Saturday in
+    # the past, then mod by 7 to get the nearest
     # Saturday in the past
     e_offset = (end.weekday() + 2) % 7
 
@@ -253,7 +264,7 @@ def run(dname='200627', ename='', data_dir='./mta_data/'):
     else:
         # reading only one file
         assert len(dname) in [6,10]
-        dname = ('20{}-{}-{}'.format(dname[:2], dname[2:4], dname[4:6]) if 
+        dname = ('20{}-{}-{}'.format(dname[:2], dname[2:4], dname[4:6]) if
                     len(dname) == 6 else dname)
         df = read_file(dname)
 
