@@ -17,7 +17,7 @@ import pandas as pd
 """
 TO WRITE IF NOTHING ELSE TO DO
 convert 2 df cols into a dict and map to second df 
--> generalize the process in pct_daily_entries
+   -> generalize the mapping process in total_daily_entries
 """
 # def map_by_date(col): 
 #     temp_df = df.copy()
@@ -36,7 +36,7 @@ def total_daily_entries(df, add_col=False):
     tde = df_tde[['date', 'net_entries']].groupby('date').sum().reset_index().rename(columns={'net_entries': 'tde'})
     
     # map TDE onto the df
-    if add_col == True:
+    if add_col:
         tde_dict = tde.set_index('date').to_dict()['tde']
         df['temp_date'] = df['datetime'].dt.date
         df['tde'] = df['temp_date'].map(tde_dict)
