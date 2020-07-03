@@ -57,8 +57,7 @@ def read_file(dt, data_dir='./mta_data/'):
     try:
         df = pd.read_csv(data_dir+'turnstile_{}.txt'.format(dname),
                                             parse_dates=[['DATE', 'TIME']])
-        df.columns = list(map((lambda x: x.strip() if isinstance(x, str) else x),
-                      df.columns.values))
+        df.columns = list(map((lambda x: x.strip() if isinstance(x, str) else x), df.columns.values))
 
         df = df.rename(columns=COLUMNS)
     except:
