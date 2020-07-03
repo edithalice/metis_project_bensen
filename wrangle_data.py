@@ -9,18 +9,7 @@ argument given, will create dataframe for week specified. If two arguments
 given, will create data frame for all weeks between the first argument and the
 second argument.
 - call agg_by(df, args) to return a data frame with entry and exit data summed
-according to args. Possible args are currently 'date', 'time', 'booth',
-'station', or some combination of 'date' or 'time' and 'booth' or 'station'.
-
-Changes as of 07/01:
-- added optional args to run() to specify week(s) of data to load as df
-- added 'booth' and 'time' options to agg_by() + cleaned it up
-- added time column to make it easier to use a variety of options in agg_by
-
-7/01 Changes 2.0
-- jk about the time column. In fact, removed date column too
-- added 'day' and 'week/day' options to agg_by to enable sorting by day of week
-    or by whether a day is a weekday or a weekend day
+according to args. See method for possible args
 
 '''
 
@@ -42,6 +31,20 @@ COLUMNS =  {'DATE_TIME': 'datetime',
             'DESC':      'desc',
             'ENTRIES':   'entries',
             'EXITS':     'exits'}
+
+SPT_COLUMNS = {'Station ID': 'stid_spt',
+               'Complex ID': 'complex_id',
+               'GTFS Stop ID': 'stop_id',
+               'Division': 'division_spt',
+               'Line': 'route',
+               'Stop Name': 'stop',
+               'Borough': 'borough',
+               'Daytime Routes': 'linename_spt',
+               'Structure': 'structure',
+               'GTFS Latitude': 'latitude',
+               'GTFS Longitude': 'longitude',
+               'North Direction Label': 'north_label',
+               'South Direction Label': 'south_label'}
 
 
 def read_file(dt, data_dir='./mta_data/'):
@@ -269,11 +272,12 @@ def agg_by(df, *args):
     Possible arguments:
     'date' -- aggregates entry and exit data for each full day
     'time' -- aggregates entry and exit data for each four hour chunk
-    'day' -- aggregates entry and exit data by day of week (will only
-        really be useful if data contains >1 week)
+    'day' -- aggregates entry and exit data by day of week
     'week/end' -- aggregates entry and exit data into week (M-F) and weekend
     'station' -- aggregates entry and exit data for each station
     'booth' -- aggregates entry and exit data for each booth
+    'complex' -- aggregates by complex id
+        *input df must have gone through one of merge functions
 
     '''
 
@@ -282,19 +286,23 @@ def agg_by(df, *args):
         aggs[1] = 'buid'
     elif 'station' in args:
         aggs[1] = 'suid'
-
-    if 'date' in args:
-        aggs = [aggs[1], df['datetime'].dt.date.rename('date')]
-    elif 'time' in args:
-        aggs = [aggs[1], df['datetime'].dt.time.rename('time')]
+    elif 'complex' in args:
+        try:
+            aggs[1] = 'complex_id'
+        except:
+            raise ValueError('df given as arg does not contain complex_id')
 
     if 'day' in args:
-        agg3 = df['datetime'].dt.day_name().rename('day')
-        aggs = [agg3, *aggs]
+        aggs = [aggs[1], df['datetime'].dt.day_name().rename('day')]
     elif 'week/end' in args:
-        aggs = [df['datetime'].dt.dayofweek.apply(lambda x: 'weekend'
+        aggs = [aggs[1] df['datetime'].dt.dayofweek.apply(lambda x: 'weekend'
                                                    if  x >= 5 else 'week')\
-                                                   .rename('week/end'), *aggs]
+                                                   .rename('week/end')]
+
+   if 'date' in args:
+       aggs = [*aggs, df['datetime'].dt.date.rename('date')]
+   elif 'time' in args:
+       aggs = [*aggs, df['datetime'].dt.time.rename('time')]
 
     # Raise error if none of the args given were recognized
     if aggs == ['datetime', 'tuid']:
@@ -303,3 +311,41 @@ def agg_by(df, *args):
 
     df = df.groupby(aggs)[['net_entries', 'net_exits']].sum().reset_index()
     return df
+
+
+def merge_complex(df):
+    '''
+    Create and clean a data frame from the remote complex data set and merge
+    into main turnstile data.
+
+    '''
+    key = pd.read_csv('remote-complex-lookup.csv')
+    key['line_name'] = key['line_name'].apply(lambda x:''.join(sorted(x)))
+    key['complex_id'] = key['complex_id'].fillna(0).astype(int)
+    del key['division']
+    new_df = df.merge(key, left_on=['unit', 'c_a'],
+                      right_on=['remote', 'booth'])
+    del new_df['remote']
+    return new_df
+
+def spt():
+    '''
+    Create and clean spt data frame from spatial data set
+    '''
+    spt = pd.read_csv('http://web.mta.info/developers/data/nyct/subway/Stations.csv')
+    spt = spt.rename(columns=SPT_COLUMNS)
+    return spt
+
+def merge_spt(df):
+    '''
+    Create and merge the spatial data set with the main turnstile data set.
+
+    '''
+    spt_df = spt()
+    if 'complex_id' not in df.columns:
+        df = merge_complex(df)
+
+    # Don't like this merge :( it works but if the mapping from new_df to spt
+    # is inaccurate for anything other complex_id
+    new_df = df.merge(spt_df, on='complex_id')
+    return new_df
