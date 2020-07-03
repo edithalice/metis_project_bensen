@@ -39,9 +39,11 @@ def merge_complex(df):
     '''
     key = pd.read_csv('remote-complex-lookup.csv')
     key['line_name'] = key['line_name'].apply(lambda x:''.join(sorted(x)))
-    key['complex_id'] = key['complex_id'].astype(int)
+    key['complex_id'] = key['complex_id'].fillna(0).astype(int)
+    del key['division']
     new_df = df.merge(key, left_on=['unit', 'c_a'],
                       right_on=['remote', 'booth'])
+    del new_df['remote']
     return new_df
 
 def spt():
@@ -57,11 +59,11 @@ def merge_spt(df):
     Create and merge the spatial data set with the main turnstile data set.
 
     '''
-    spt = spt()
+    spt_df = spt()
     if 'complex_id' not in df.columns:
         df = merge_complex(df)
 
     # Don't like this merge :( it works but if the mapping from new_df to spt
     # is inaccurate for anything other complex_id
-    new_df = df.merge(spt, on='complex_id')
+    new_df = df.merge(spt_df, on='complex_id')
     return new_df
