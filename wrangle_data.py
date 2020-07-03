@@ -139,11 +139,11 @@ def calc_nets(df):
     df['net_entries'] = tuid_groups['entries'].diff().shift(-1)
     df['net_exits'] = tuid_groups['exits'].diff().shift(-1)
 
-    # TODO: Note that this leaves the last row of each group with NaN values
+    # Note that this leaves the last row of each group with NaN values
     # for net_entries and net_exits. Handle that by dropping them
     df = df.dropna()
 
-    # TODO: Convert np.float64 columns to np.int64 using .astype(int)
+    # Convert np.float64 columns to np.int64 using .astype(int)
     df['net_entries'] = df['net_entries'].astype(int)
     df['net_exits'] = df['net_exits'].astype(int)
 
