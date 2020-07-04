@@ -17,6 +17,7 @@ according to args. Possible args are currently 'date', 'time', 'booth',
 import numpy as np
 import pandas as pd
 from datetime import date, datetime, timedelta
+from pandas.api.types import CategoricalDtype
 
 # Deals with SettingWithCopyWarning
 pd.options.mode.chained_assignment = None
@@ -46,6 +47,10 @@ SPT_COLUMNS = {'Station ID': 'stid_spt',
                'GTFS Longitude': 'longitude',
                'North Direction Label': 'north_label',
                'South Direction Label': 'south_label'}
+
+#Making an ordered category for weekdays so they don't sort alphabetically
+cats = CategoricalDtype(['Monday', 'Tuesday', 'Wednesday', 'Thursday',
+                        'Friday', 'Saturday', 'Sunday'], ordered=True)
 
 
 def read_file(dt, data_dir='./mta_data/'):
@@ -292,46 +297,61 @@ def agg_by(df, *args):
     function!
 
     Possible arguments:
+    Enter at most one of the following:
     'date' -- aggregates entry and exit data for each full day
-    'time' -- aggregates entry and exit data for each four hour chunk
     'day' -- aggregates entry and exit data by day of week
     'week/end' -- aggregates entry and exit data into week (M-F) and weekend
+
+    Enter at most one of the following:
     'station' -- aggregates entry and exit data for each station
     'booth' -- aggregates entry and exit data for each booth
     'complex' -- aggregates by complex id
         *input df must have gone through one of merge functions
 
-    '''
+    The 'time' argument may be entered by itself or combined with one or two
+    other arguments from the above categories
 
-    aggs = ['datetime', 'tuid']
+    '''
+    sp_agg = 'tuid'
+    aggs = ['datetime', sp_agg]
+
     if 'booth' in args:
-        aggs[1] = 'buid'
+        sp_agg = aggs[1] = 'buid'
     elif 'station' in args:
-        aggs[1] = 'suid'
+        sp_agg = aggs[1] = 'suid'
     elif 'complex' in args:
         try:
-            aggs[1] = 'complex_id'
+            sp_agg = aggs[1] = 'complex_id'
         except:
             raise ValueError('df given as arg does not contain complex_id')
 
     if 'day' in args:
         aggs = [aggs[1], df['datetime'].dt.day_name().rename('day')]
+        if 'time' in args:
+            aggs = [*aggs, df['datetime'].dt.time.rename('time')]
     elif 'week/end' in args:
         aggs = [aggs[1], df['datetime'].dt.dayofweek.apply(lambda x: 'weekend'
                                                    if  x >= 5 else 'week')\
                                                    .rename('week/end')]
+        if 'time' in args:
+            aggs = [*aggs, df['datetime'].dt.time.rename('time')]
 
-    if 'date' in args:
-       aggs = [*aggs, df['datetime'].dt.date.rename('date')]
+    elif 'date' in args:
+        aggs = [aggs[1], df['datetime'].dt.date.rename('date')]
     elif 'time' in args:
-       aggs = [*aggs, df['datetime'].dt.time.rename('time')]
+        aggs = [aggs[1], df['datetime'].dt.time.rename('time')]
 
     # Raise error if none of the args given were recognized
     if aggs == ['datetime', 'tuid']:
         raise ValueError('Incorrect input argument(s)')
 
 
-    df = df.groupby(aggs)[['net_entries', 'net_exits']].sum().reset_index()
+    df = df.groupby(aggs)[['net_entries', 'net_exits',
+                            'traffic']].sum().reset_index()
+    if 'day' in args:
+        #reassign string day names as ordered categorical variable and sort
+        df['day'] = df['day'].astype(cats)
+        df = df.sort_values([sp_agg, 'day'])
     return df
 
 
