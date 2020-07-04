@@ -47,7 +47,7 @@ SPT_COLUMNS = {'Station ID': 'stid_spt',
                'North Direction Label': 'north_label',
                'South Direction Label': 'south_label'}
 
-cats = CategoricalDtype(categories=['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'], ordered=True)
+cats = CategoricalDtype(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'], ordered=True)
 
 
 def read_file(dt, data_dir='./mta_data/'):
@@ -288,16 +288,16 @@ def agg_by(df, *args):
     other arguments from the above categories
 
     '''
-
-    aggs = ['datetime', 'tuid']
+    sp_agg = 'tuid'
+    aggs = ['datetime', sp_agg]
 
     if 'booth' in args:
-        aggs[1] = 'buid'
+        sp_agg = aggs[1] = 'buid'
     elif 'station' in args:
-        aggs[1] = 'suid'
+        sp_agg = aggs[1] = 'suid'
     elif 'complex' in args:
         try:
-            aggs[1] = 'complex_id'
+            sp_agg = aggs[1] = 'complex_id'
         except:
             raise ValueError('df given as arg does not contain complex_id')
 
@@ -322,10 +322,10 @@ def agg_by(df, *args):
         raise ValueError('Incorrect input argument(s)')
 
 
-    df = df.groupby(aggs)[['net_entries', 'net_exits']].sum().reindex()
-    # if 'day' in args:
-    #     df['day'] = df['day'].astype(cats)
-    #     df.sort_values(aggs)
+    df = df.groupby(aggs)[['net_entries', 'net_exits']].sum().reset_index()
+    if 'day' in args:
+        df['day'] = df['day'].astype(cats)
+        df = df.sort_values([sp_agg, 'day'])
     return df
 
 
