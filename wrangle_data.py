@@ -324,7 +324,8 @@ def agg_by(df, *args):
         raise ValueError('Incorrect input argument(s)')
 
 
-    df = df.groupby(aggs)[['net_entries', 'net_exits']].sum().reset_index()
+    df = df.groupby(aggs)[['net_entries', 'net_exits',
+                            'traffic']].sum().reset_index()
     if 'day' in args:
         #reassign string day names as ordered categorical variable and sort
         df['day'] = df['day'].astype(cats)
