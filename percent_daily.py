@@ -1,3 +1,15 @@
+"""
+Provides functions for plotting percent of daily entries (pct_de) data 
+And for returning the top stations by pct_de 
+
+functions: 
+- clean_data(): preps the df and adds pct_de column
+- pct_dist(): draws distplot of pct_de
+- pct_plot(): draws plot of how many stations capture what pct_de (e.g. top 50 stations -> 38%$ of daily entries)
+- top_stations(): returns a list of lists denoting # of stations observed and % of daily entries captured
+"""
+
+
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
