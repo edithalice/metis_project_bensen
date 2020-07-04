@@ -73,10 +73,11 @@ def density(df, add_col=False):
     add_col=True -> add density column to df
     add_col=False -> returns suid, datetime, density as a df
     """
+    density_df = df.copy()
     density = df['traffic'] / df['ts_count']
     if add_col:
-        df['density'] = density
-        return df
+        density_df['density'] = density
+        return density_df
     else: 
         density_df = df[['datetime', 'suid', 'traffic', 'ts_count']]
         density_df['density'] = density_df['traffic'] / density_df['ts_count'] 
