@@ -295,13 +295,13 @@ def agg_by(df, *args):
     if 'day' in args:
         aggs = [aggs[1], df['datetime'].dt.day_name().rename('day')]
     elif 'week/end' in args:
-        aggs = [aggs[1] df['datetime'].dt.dayofweek.apply(lambda x: 'weekend'
+        aggs = [aggs[1], df['datetime'].dt.dayofweek.apply(lambda x: 'weekend'
                                                    if  x >= 5 else 'week')\
                                                    .rename('week/end')]
 
-   if 'date' in args:
+    if 'date' in args:
        aggs = [*aggs, df['datetime'].dt.date.rename('date')]
-   elif 'time' in args:
+    elif 'time' in args:
        aggs = [*aggs, df['datetime'].dt.time.rename('time')]
 
     # Raise error if none of the args given were recognized
