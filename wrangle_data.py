@@ -16,6 +16,7 @@ according to args. See method for possible args
 import numpy as np
 import pandas as pd
 from datetime import date, datetime, timedelta
+from pandas.api.types import CategoricalDtype
 
 # Deals with SettingWithCopyWarning
 pd.options.mode.chained_assignment = None
@@ -45,6 +46,8 @@ SPT_COLUMNS = {'Station ID': 'stid_spt',
                'GTFS Longitude': 'longitude',
                'North Direction Label': 'north_label',
                'South Direction Label': 'south_label'}
+
+cats = CategoricalDtype(categories=['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'], ordered=True)
 
 
 def read_file(dt, data_dir='./mta_data/'):
@@ -301,13 +304,13 @@ def agg_by(df, *args):
     if 'day' in args:
         aggs = [aggs[1], df['datetime'].dt.day_name().rename('day')]
         if 'time' in args:
-            aggs = [aggs[0], df['datetime'].dt.time.rename('time'), aggs[1]]
+            aggs = [*aggs, df['datetime'].dt.time.rename('time')]
     elif 'week/end' in args:
         aggs = [aggs[1], df['datetime'].dt.dayofweek.apply(lambda x: 'weekend'
                                                    if  x >= 5 else 'week')\
                                                    .rename('week/end')]
         if 'time' in args:
-            aggs = [aggs[0], df['datetime'].dt.time.rename('time'), aggs[1]]
+            aggs = [*aggs, df['datetime'].dt.time.rename('time')]
 
     elif 'date' in args:
         aggs = [aggs[1], df['datetime'].dt.date.rename('date')]
@@ -319,7 +322,10 @@ def agg_by(df, *args):
         raise ValueError('Incorrect input argument(s)')
 
 
-    df = df.groupby(aggs)[['net_entries', 'net_exits']].sum().reset_index()
+    df = df.groupby(aggs)[['net_entries', 'net_exits']].sum().reindex()
+    # if 'day' in args:
+    #     df['day'] = df['day'].astype(cats)
+    #     df.sort_values(aggs)
     return df
 
 
