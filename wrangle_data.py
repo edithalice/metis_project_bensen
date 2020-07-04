@@ -47,7 +47,9 @@ SPT_COLUMNS = {'Station ID': 'stid_spt',
                'North Direction Label': 'north_label',
                'South Direction Label': 'south_label'}
 
-cats = CategoricalDtype(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'], ordered=True)
+#Making an ordered category for weekdays so they don't sort alphabetically
+cats = CategoricalDtype(['Monday', 'Tuesday', 'Wednesday', 'Thursday',
+                        'Friday', 'Saturday', 'Sunday'], ordered=True)
 
 
 def read_file(dt, data_dir='./mta_data/'):
@@ -324,6 +326,7 @@ def agg_by(df, *args):
 
     df = df.groupby(aggs)[['net_entries', 'net_exits']].sum().reset_index()
     if 'day' in args:
+        #reassign string day names as ordered categorical variable and sort
         df['day'] = df['day'].astype(cats)
         df = df.sort_values([sp_agg, 'day'])
     return df
