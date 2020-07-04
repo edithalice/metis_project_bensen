@@ -270,18 +270,24 @@ def agg_by(df, *args):
     function!
 
     Possible arguments:
+    Enter at most one of the following:
     'date' -- aggregates entry and exit data for each full day
-    'time' -- aggregates entry and exit data for each four hour chunk
     'day' -- aggregates entry and exit data by day of week
     'week/end' -- aggregates entry and exit data into week (M-F) and weekend
+
+    Enter at most one of the following:
     'station' -- aggregates entry and exit data for each station
     'booth' -- aggregates entry and exit data for each booth
     'complex' -- aggregates by complex id
         *input df must have gone through one of merge functions
 
+    The 'time' argument may be entered by itself or combined with one or two
+    other arguments from the above categories
+
     '''
 
     aggs = ['datetime', 'tuid']
+
     if 'booth' in args:
         aggs[1] = 'buid'
     elif 'station' in args:
@@ -294,15 +300,19 @@ def agg_by(df, *args):
 
     if 'day' in args:
         aggs = [aggs[1], df['datetime'].dt.day_name().rename('day')]
+        if 'time' in args:
+            aggs = [aggs[0], df['datetime'].dt.time.rename('time'), aggs[1]]
     elif 'week/end' in args:
         aggs = [aggs[1], df['datetime'].dt.dayofweek.apply(lambda x: 'weekend'
                                                    if  x >= 5 else 'week')\
                                                    .rename('week/end')]
+        if 'time' in args:
+            aggs = [aggs[0], df['datetime'].dt.time.rename('time'), aggs[1]]
 
-    if 'date' in args:
-       aggs = [*aggs, df['datetime'].dt.date.rename('date')]
+    elif 'date' in args:
+        aggs = [aggs[1], df['datetime'].dt.date.rename('date')]
     elif 'time' in args:
-       aggs = [*aggs, df['datetime'].dt.time.rename('time')]
+        aggs = [aggs[1], df['datetime'].dt.time.rename('time')]
 
     # Raise error if none of the args given were recognized
     if aggs == ['datetime', 'tuid']:
