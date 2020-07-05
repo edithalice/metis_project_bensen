@@ -9,7 +9,8 @@ argument given, will create dataframe for week specified. If two arguments
 given, will create data frame for all weeks between the first argument and the
 second argument.
 - call agg_by(df, args) to return a data frame with entry and exit data summed
-according to args. See method for possible args
+according to args. Possible args are currently 'date', 'time', 'booth',
+'station', or some combination of 'date' or 'time' and 'booth' or 'station'.
 
 '''
 
@@ -54,7 +55,10 @@ cats = CategoricalDtype(['Monday', 'Tuesday', 'Wednesday', 'Thursday',
 
 def read_file(dt, data_dir='./mta_data/'):
     '''
-    Assumes data files are in ./mta_data/ directory
+    Reads one single turnstile file and returns a DataFrame
+    of that data. Data files are assumed to be within ./mta_data/
+    by default.
+
     Args:
         dt (str): yyyy-mm-dd format date
     '''
@@ -74,7 +78,8 @@ def read_file(dt, data_dir='./mta_data/'):
 
 def read_files(dts, data_dir='./mta_data/'):
     '''
-    Reads multiple files and returns one single DataFrame
+    Reads multiple turnstile files and combines them into 
+    one single DataFrame.
 
     Args:
         dts (list): list of dates in yyyy-mm-dd format
@@ -99,7 +104,7 @@ def clean(df):
     for col in str_cols:
         df[col] = df[col].str.strip()
 
-    # TODO: sort linename
+    #  Sort linename
     df['linename'] = df['linename'].apply(lambda x:''.join(sorted(x)))
 
     # TODO: NaN handling. Rows with empty cells or '-'
@@ -131,9 +136,16 @@ def clean(df):
 
 def calc_nets(df):
     '''
-    Create two new columns (net_entries, net_exits) that contains the net
-    entries and net exits of each turnstile for each four hour period.
-    AKA converts entries and exits from cumulative values to net values.
+    Adds three columns to a turnstile DataFrame:
+         - net_entries: number of entries in a four hour period
+         - net_exits: number of exits in a four hour period
+         - traffic: sum of net_entries and net_exits
+
+    This method converts cumulative entry/exit values to raw traffic
+    values within a set period. Also handles NaN values and outliers.
+
+    Args:
+        df (DataFrame): DataFrame of turnstile data
 
     '''
     # Group by tuid and calculate deltas between rows
@@ -147,11 +159,11 @@ def calc_nets(df):
     df['net_entries'] = tuid_groups['entries'].diff().shift(-1)
     df['net_exits'] = tuid_groups['exits'].diff().shift(-1)
 
-    # TODO: Note that this leaves the last row of each group with NaN values
+    # Note that this leaves the last row of each group with NaN values
     # for net_entries and net_exits. Handle that by dropping them
     df = df.dropna()
 
-    # TODO: Convert np.float64 columns to np.int64 using .astype(int)
+    # Convert np.float64 columns to np.int64 using .astype(int)
     df['net_entries'] = df['net_entries'].astype(int)
     df['net_exits'] = df['net_exits'].astype(int)
 
@@ -169,6 +181,10 @@ def calc_nets(df):
 
 def query_dates(df, start, end):
     """
+    Given DataFrame of turnstile data, returns only rows
+    where its datetime timestamp is between [start, end).
+
+
     Args:
         df (DataFrame): preprocessed DataFrame
         start (str): start date
@@ -178,6 +194,10 @@ def query_dates(df, start, end):
                 (df['datetime'].dt.date < pd.to_datetime(end))]
 
 def drop_dates(df, start, end):
+    """
+    Given DataFrame of turnstile data, removes rows where
+    its datetime timestamp is between [start, end).
+    """
     return df[(df['datetime'].dt.date < pd.to_datetime(start)) | \
                 (df['datetime'].dt.date >= pd.to_datetime(end))]
 
@@ -193,6 +213,8 @@ def get_saturdays_between(start, end):
     """
     Returns list of dates of all Saturdays between start
     and end, inclusive.
+
+    start and end do not need to be dates of Saturdays.
 
     Args:
         start (str): date in yymmdd or yyyy-mm-dd format
