@@ -157,7 +157,7 @@ def calc_nets(df):
 
     # Handle ridiculously large net_entries and net_exits
     # Some net_entries and net_exits are < 0, e.g. a turnstile that counts
-    # backards. Drop those rows
+    # backwards. Drop those rows
     threshold = 7200  #  more than 1 person every 2 secs is unlikely
     df = (df[(df['net_entries']>=0) & (df['net_exits']>=0) &
             (df['net_entries']<=threshold) & (df['net_exits']<=threshold)])
@@ -279,6 +279,7 @@ def agg_by(df, *args):
     'date' -- aggregates entry and exit data for each full day
     'day' -- aggregates entry and exit data by day of week
     'week/end' -- aggregates entry and exit data into week (M-F) and weekend
+    'all' -- aggregates entry and exit data for all time stamps in df
 
     Enter at most one of the following:
     'station' -- aggregates entry and exit data for each station
@@ -287,7 +288,7 @@ def agg_by(df, *args):
         *input df must have gone through one of merge functions
 
     The 'time' argument may be entered by itself or combined with one or two
-    other arguments from the above categories
+    other arguments from the above categories except for 'all'
 
     '''
     sp_agg = 'tuid'
@@ -303,7 +304,9 @@ def agg_by(df, *args):
         except:
             raise ValueError('df given as arg does not contain complex_id')
 
-    if 'day' in args:
+    if 'all' in args:
+        aggs = sp_agg
+    elif 'day' in args:
         aggs = [aggs[1], df['datetime'].dt.day_name().rename('day')]
         if 'time' in args:
             aggs = [*aggs, df['datetime'].dt.time.rename('time')]
@@ -341,11 +344,15 @@ def merge_complex(df):
     '''
     key = pd.read_csv('remote-complex-lookup.csv')
     key['line_name'] = key['line_name'].apply(lambda x:''.join(sorted(x)))
-    key['complex_id'] = key['complex_id'].fillna(0).astype(int)
+    key['complex_id'] = key['complex_id'].dropna().astype(int)
     del key['division']
-    new_df = df.merge(key, left_on=['unit', 'c_a'],
+    new_df = df.merge(key, how='left', left_on=['unit', 'c_a'],
                       right_on=['remote', 'booth'])
     del new_df['remote']
+    del new_df['booth']
+    df_cc = df.groupby('complex_id')['tuid'].nunique().to_dict()
+    df['ts_count_complex'] = df.complex_id.map(df_cc)
+    new_df = new_df.dropna()
     return new_df
 
 def spt():
@@ -367,5 +374,6 @@ def merge_spt(df):
 
     # Don't like this merge :( it works but if the mapping from new_df to spt
     # is inaccurate for anything other complex_id
-    new_df = df.merge(spt_df, on='complex_id')
+    new_df = df.merge(spt_df, how='left', on='complex_id')
+    new_df = new_df.dropna()
     return new_df
